@@ -1,23 +1,7 @@
-#define MQTT_SERVER "10.0.0.66"
-#define MQTT_PORT 1883
-#define MQTT_USER "gerbenvaneerten@gmail.com"
-#define MQTT_PASSWORD "Dwe57Kj8"
-
-#define MQTT_DISPLAY_TOPIC "displays/DS18B20"
-#define MQTT_SENSOR_TOPIC "sensors/DS18B20"
-
-#define PIN_RESET 255  //
-#define DC_JUMPER 0  // I2C Addres: 0 - 0x3C, 1 - 0x3D
-
-//#define _DEBUG_
-
-#include <Arduino.h>
-
 #include <Thing.h>
-
 #include <MPU9250.h>
+#include <devices/SSD1306I2C.h>
 #include <Point3D_Print.h>
-
 #include <BlinkAsync.h>
 
 using namespace g3rb3n;
@@ -25,10 +9,7 @@ using namespace g3rb3n;
 Thing thing;
 MPU9250 mpu;
 BlinkAsync led(LED_BUILTIN, HIGH, LOW);
-
-std::string client;
-std::string sensor_topic;
-std::string display_topic;
+SSD1306I2C oled(0x3C, 128, 64);
 
 Point3D<float> a;
 Point3D<float> avg;
@@ -43,6 +24,58 @@ float threshold = .03;
 float avgD = 100.;
 float maxDev = 0;
 float dev;
+
+void setup()
+{
+  pinMode(BUILTIN_LED, OUTPUT);  
+
+  setupSerial();
+  setupOLED();
+  setupThing();
+  setupQuake();
+
+  display(thing.clientId(), 0, 3);
+  Serial.println(thing.clientId());
+  led.setIntervals(900, 100);
+}
+
+void loop() 
+{
+  led.handle();
+  thing.handle();
+  sample();
+}
+
+void setupSerial()
+{
+  Serial.begin(230400);
+  Serial.println();  
+}
+
+void setupOLED()
+{
+  oled.begin();
+  oled.flipHorizontal(true);
+  oled.flipVertical(true);
+}
+
+void setupThing() 
+{
+  thing.onStateChange([](const String& msg){
+    display(msg, 6, 2);
+    Serial.println(msg);
+  });
+
+  String sensor = "sensor/quake/";
+  sensor += thing.clientId();
+  thing.addSensor(sensor, 1000, getValue);
+
+  String display = "display/quake/";
+  display += thing.clientId();
+  thing.addActuator(display, callback);
+
+  thing.begin();
+}
 
 float max(float a, float b)
 {
@@ -59,10 +92,9 @@ bool sample()
   now = millis();
   if (now > next)
   {
-    Serial.print("@ ");
-    Serial.print(static_cast<float>(count), 2);
-    Serial.print(" Hz");
-    Serial.println();
+    String s = "@ " + String(static_cast<float>(count)) + " Hz";
+    display(s, 5, 1);
+    Serial.println(s);
     count = 0;
     next = now + 1000;
   }
@@ -81,11 +113,11 @@ bool sample()
   maxDev = max(maxDev, dev);
   dev = abso(devP.z);
   maxDev = max(maxDev, dev);
-  if(
+  if(debug && (
     abso(a.x - avg.x) > threshold ||
     abso(a.y - avg.y) > threshold ||
     abso(a.z - avg.z) > threshold
-  )
+  ))
   {
     Serial.print("quake : ");
     Serial.print(abso(devP.x), 5);
@@ -95,6 +127,7 @@ bool sample()
     Serial.print(abso(devP.z), 5);
     Serial.println();
   }
+
   a = avg;
   if(debug)
   {
@@ -135,64 +168,6 @@ void printSettings()
   Serial.println();
 }
 
-void setup()
-{
-  pinMode(BUILTIN_LED, OUTPUT);  
-  Serial.begin(230400);
-  setupThing();
-  setupQuake();
-  led.setIntervals(900, 100);
-}
-
-
-void loop() 
-{
-  led.handle();
-  thing.handle();
-  sample();
-}
-
-void setupThing() {
-
-  onActivity(true);
-
-  char chipid[40];
-  sprintf(chipid, "%08X", ESP.getChipId());
-
-  Serial.println();
-  client += chipid;
-  Serial.print("Client:");
-  Serial.print(client.c_str());
-  Serial.println();
-  
-  thing.onActivity(&onActivity);
-  thing.addWiFi("woonkamer", "ongratis");
-  thing.addWiFi("central", "ongratis");
-  thing.addWiFi("zuid", "ongratis");
-  thing.addWiFi("rfln", "ongratis");
-  thing.setupWiFi();
-  thing.setMQTT(MQTT_SERVER, MQTT_PORT, client.c_str(), MQTT_USER, MQTT_PASSWORD);
-
-  sensor_topic += "sensors/Quake/";
-  sensor_topic += chipid;
-  thing.addSensorTopic(sensor_topic.c_str(), 1000, getValue);
-  Serial.println(sensor_topic.c_str());
-
-  display_topic += "displays/Quake/";
-  display_topic += chipid;
-  thing.addActuatorTopic(display_topic.c_str(), callback);
-  Serial.println(display_topic.c_str());
-
-  onActivity(false);
-
-  thing.onActivity(0);
-}
-
-void onActivity(bool active)
-{
-  digitalWrite(BUILTIN_LED, active ? LOW : HIGH);  
-}
-
 void setupQuake() 
 {
   while(!mpu.connected())
@@ -223,15 +198,34 @@ void setupQuake()
   delay(1000);
 }
 
-void getValue(float& value)
+void getValue(Value& value)
 {
-  onActivity(true);
   value = maxDev * 1000;
+  String s = "@ ";
+  s += (float)value;
+  s += " mG";
+  display(s, 4, 1);
   maxDev = 0;
-  onActivity(false);
 }
 
-void callback(float &s)
+void callback(Value& s)
 {
-  Serial.println(s, 10);
+  String msg(s);
+  display(msg, 0, 3);
+  Serial.println(msg);
+}
+
+String empty("                     ");
+
+void display(const String& value, int row, int rows)
+{
+  //oled.clear();
+  for (uint8_t i = 0 ; i < rows ; ++i)
+  {
+    oled.setCursor(i+row,0);
+    oled.print(empty);
+  }
+  oled.setCursor(row,0);
+  oled.print(value);
+  oled.display(); 
 }
