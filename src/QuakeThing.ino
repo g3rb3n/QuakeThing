@@ -4,6 +4,9 @@
 #include <Point3D_Print.h>
 #include <BlinkAsync.h>
 
+#include <I2C.h>
+#include <SPI.h>
+
 using namespace g3rb3n;
 
 Thing thing;
@@ -27,7 +30,7 @@ float dev;
 
 void setup()
 {
-  pinMode(BUILTIN_LED, OUTPUT);  
+  pinMode(BUILTIN_LED, OUTPUT);
 
   setupSerial();
   setupOLED();
@@ -39,7 +42,7 @@ void setup()
   led.setIntervals(900, 100);
 }
 
-void loop() 
+void loop()
 {
   led.handle();
   thing.handle();
@@ -49,7 +52,7 @@ void loop()
 void setupSerial()
 {
   Serial.begin(230400);
-  Serial.println();  
+  Serial.println();
 }
 
 void setupOLED()
@@ -59,22 +62,18 @@ void setupOLED()
   oled.flipVertical(true);
 }
 
-void setupThing() 
+void setupThing()
 {
   thing.onStateChange([](const String& msg){
     display(msg, 6, 2);
     Serial.println(msg);
   });
 
-  String sensor = "sensor/quake/";
-  sensor += thing.clientId();
-  thing.addSensor(sensor, 1000, getValue);
-
-  String display = "display/quake/";
-  display += thing.clientId();
-  thing.addActuator(display, callback);
-
   thing.begin();
+
+  thing.addSensor(thing.clientId() + "/quake/acceleration", 1000, getValue);
+
+  thing.addActuator(thing.clientId() + "/quake/display", callback);
 }
 
 float max(float a, float b)
@@ -168,7 +167,7 @@ void printSettings()
   Serial.println();
 }
 
-void setupQuake() 
+void setupQuake()
 {
   while(!mpu.connected())
   {
@@ -176,7 +175,7 @@ void setupQuake()
     Serial.print(mpu.identification());
     Serial.println();
   }
-  
+
   mpu.reset();
   while (!mpu.isReset())
   {
@@ -192,7 +191,7 @@ void setupQuake()
   mpu.setSampleRateDividerMode(RATE_DIVIDER_1);
 
   printSettings();
-  
+
   Serial.println("MPU9250 initialized");
 
   delay(1000);
@@ -227,5 +226,5 @@ void display(const String& value, int row, int rows)
   }
   oled.setCursor(row,0);
   oled.print(value);
-  oled.display(); 
+  oled.display();
 }
